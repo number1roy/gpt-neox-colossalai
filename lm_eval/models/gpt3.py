@@ -31,7 +31,7 @@ def get_result(response, ctxlen):
         if top_token != token:
             is_greedy = False
             break
-    
+
     return continuation_logprobs, is_greedy
 
 
@@ -105,7 +105,7 @@ class GPT3LM(BaseLM):
 
     def tok_encode(self, string: str):
         return self.tokenizer.encode(string, add_special_tokens=False)
-    
+
     def tok_decode(self, tokens):
         return self.tokenizer.decode(tokens)
 
@@ -118,7 +118,7 @@ class GPT3LM(BaseLM):
             # we care about and so we need some kind of backup for when it isn't
             toks = x[1] + x[2]
             return -len(toks), tuple(toks)
-        
+
         reord = utils.Reorderer(requests, _collate)
 
         for chunk in tqdm(list(utils.chunks(reord.get_reordered(), self.REQ_CHUNK_SIZE)), disable=disable_tqdm):
@@ -160,7 +160,7 @@ class GPT3LM(BaseLM):
         def _collate(x):
             toks = self.tok_encode(x[0])
             return len(toks), x[0]
-        
+
         reord = utils.Reorderer(requests, _collate)
 
         def sameuntil_chunks(xs, size):
@@ -172,7 +172,7 @@ class GPT3LM(BaseLM):
                     ret = []
                     lastuntil = x[1]
                 ret.append(x)
-            
+
             if ret:
                 yield ret, lastuntil
 
@@ -187,7 +187,7 @@ class GPT3LM(BaseLM):
             response = oa_completion(
                 engine=self.engine,
                 prompt=inps,
-                max_tokens=self.max_gen_toks, 
+                max_tokens=self.max_gen_toks,
                 temperature=0.,
                 logprobs=10,
                 stop=until,
@@ -201,7 +201,7 @@ class GPT3LM(BaseLM):
 
                 # partial caching
                 self.cache_hook.add_partial("greedy_until", (context, until_), s)
-                
+
                 res.append(s)
         
         return reord.get_original(res)

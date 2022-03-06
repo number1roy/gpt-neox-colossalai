@@ -25,25 +25,27 @@ def main():
     else:
         task_names = gpc.config.task_list
 
-    description_dict = {}
+    description_dict = None
     if gpc.config.description_dict_path:
+        description_dict = {}
         with open(gpc.config.description_dict_path, 'r') as f:
             description_dict = json.load(f)
 
     results = evaluator.simple_evaluate(
-        model='gpt2',
+        model=gpc.config.model_type,
         model_args=None,
         tasks=gpc.config.task_list,
-        num_fewshot=0,
-        device='cuda:0',
+        num_fewshot=gpc.config.num_fewshot,
+        device='cuda',
         no_cache=False,
         limit=None,
-        description_dict=None
+        description_dict=description_dict
     )
 
     dumped = json.dumps(results, indent=2)
 
-    print(dumped)
+    if gpc.get_global_rank() == 0:
+        print(dumped)
 
     if gpc.config.output_path:
         with open(gpc.config.output_path, "w") as f:

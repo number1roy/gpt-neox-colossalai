@@ -7,7 +7,7 @@ import lm_eval.tasks
 import lm_eval.base
 import numpy as np
 from lm_eval.utils import positional_deprecated
-
+from colossalai.core import global_context as gpc
 
 @positional_deprecated
 def simple_evaluate(model, model_args=None, tasks=[],
@@ -19,7 +19,7 @@ def simple_evaluate(model, model_args=None, tasks=[],
     :param model: Union[str, LM]
         Name of model or LM object, see lm_eval.models.get_model
     :param model_args: Optional[str]
-        String arguments for each model class, see LM.create_from_arg_string. 
+        String arguments for each model class, see LM.create_from_arg_string.
         Ignored if `model` argument is a LM object.
     :param tasks: list[Union[str, Task]]
         List of task names or Task objects. Task objects will be taken to have name task.EVAL_HARNESS_NAME if defined and type(task).__name__ otherwise.
@@ -36,7 +36,7 @@ def simple_evaluate(model, model_args=None, tasks=[],
     :param bootstrap_iters:
         Number of iterations for bootstrap statistics
     :param description_dict: dict[str, str]
-        Dictionary of custom task descriptions of the form: `task_name: description` 
+        Dictionary of custom task descriptions of the form: `task_name: description`
     :return
         Dictionary of results
     """
@@ -58,7 +58,7 @@ def simple_evaluate(model, model_args=None, tasks=[],
         lm = lm_eval.base.CachingLM(
             lm, 'lm_cache/' + model + '_' + model_args.replace('=', '-').replace(',', '_').replace('/', '-') + '.db'
         )
-    
+
     task_dict = lm_eval.tasks.get_task_dict(tasks)
 
     results = evaluate(
@@ -102,7 +102,7 @@ def evaluate(lm, task_dict, provide_description=None, num_fewshot=0, limit=None,
     :param bootstrap_iters:
         Number of iterations for bootstrap statistics
     :param description_dict: dict[str, str]
-        Dictionary of custom task descriptions of the form: `task_name: description` 
+        Dictionary of custom task descriptions of the form: `task_name: description`
     :return
         Dictionary of results
     """
@@ -187,7 +187,7 @@ def evaluate(lm, task_dict, provide_description=None, num_fewshot=0, limit=None,
 
         for resp, (i, task_name, doc, doc_id) in zip(resps, requests_origin[reqtype]):
             process_res_queue[(task_name, doc_id)].append((i, resp))
-    
+
     vals = collections.defaultdict(list)
 
     # unpack results and sort back in order and return control to Task
@@ -201,7 +201,7 @@ def evaluate(lm, task_dict, provide_description=None, num_fewshot=0, limit=None,
         metrics = task.process_results(doc, requests)
         for metric, value in metrics.items():
             vals[(task_name, metric)].append(value)
-    
+
     # aggregate results
     for (task_name, metric), items in vals.items():
         task = task_dict[task_name]
@@ -215,7 +215,7 @@ def evaluate(lm, task_dict, provide_description=None, num_fewshot=0, limit=None,
         )
         if stderr is not None:
             results[task_name][metric + "_stderr"] = stderr(items)
-    
+
     return {
         "results": dict(results),
         "versions": dict(versions)
@@ -225,31 +225,32 @@ def evaluate(lm, task_dict, provide_description=None, num_fewshot=0, limit=None,
 def make_table(result_dict):
     """Generate table of results."""
     from pytablewriter import MarkdownTableWriter, LatexTableWriter
+    if gpc.get_global_rank() == 0:
+        md_writer = MarkdownTableWriter()
+        latex_writer = LatexTableWriter()
+        md_writer.headers = ["Task", "Version", "Metric", "Value", "", "Stderr"]
+        latex_writer.headers = ["Task", "Version", "Metric", "Value", "", "Stderr"]
 
-    md_writer = MarkdownTableWriter()
-    latex_writer = LatexTableWriter()
-    md_writer.headers = ["Task", "Version", "Metric", "Value", "", "Stderr"]
-    latex_writer.headers = ["Task", "Version", "Metric", "Value", "", "Stderr"]
+        values = []
 
-    values = []
+        for k, dic in result_dict["results"].items():
+            version = result_dict["versions"][k]
+            for m, v in dic.items():
+                if m.endswith("_stderr"):
+                    continue
 
-    for k, dic in result_dict["results"].items():
-        version = result_dict["versions"][k]
-        for m, v in dic.items():
-            if m.endswith("_stderr"):
-                continue
+                if m + "_stderr" in dic:
+                    se = dic[m + "_stderr"]
+                    values.append([k, version, m, '%.4f' % v, '±', '%.4f' % se])
+                else:
+                    values.append([k, version, m, '%.4f' % v, '', ''])
+                k = ""
+                version = ""
+        md_writer.value_matrix = values
+        latex_writer.value_matrix = values
 
-            if m + "_stderr" in dic:
-                se = dic[m + "_stderr"]
-                values.append([k, version, m, '%.4f' % v, '±', '%.4f' % se])
-            else:
-                values.append([k, version, m, '%.4f' % v, '', ''])
-            k = ""
-            version = ""
-    md_writer.value_matrix = values
-    latex_writer.value_matrix = values
-
-    # todo: make latex table look good
-    # print(latex_writer.dumps())
-
-    return md_writer.dumps()
+        # todo: make latex table look good
+        # print(latex_writer.dumps())
+        return md_writer.dumps()
+    else:
+        pass

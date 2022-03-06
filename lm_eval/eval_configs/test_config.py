@@ -44,6 +44,8 @@ loss_fn = dict(type=vocab_parallel_cross_entropy)
 checkpoint_path = '/home/lclbw/gpt_pretrained/small_ckpt'
 
 task_list = ['cola', 'mnli', 'mnli_mismatched', 'mrpc', 'rte', 'qnli', 'qqp', 'sst', 'wnli']
+num_fewshot = 0
 max_position_embeddings = 512
+
 description_dict_path = None
 output_path = '/home/lclbw/eval_output'

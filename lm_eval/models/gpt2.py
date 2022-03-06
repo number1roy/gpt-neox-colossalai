@@ -1,7 +1,7 @@
 import transformers
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import colossalai
 import contextlib
 import colossalai.utils as col_utils
@@ -9,8 +9,6 @@ from tqdm import tqdm
 from lm_eval.base import BaseLM
 from lm_eval import utils
 
-# from ...model.gpt2_pp1d import *
-# from ...model.pipline_gpt1d import *
 from colossalai.registry import DATASETS
 from colossalai.core import global_context as gpc
 from colossalai.utils import is_using_pp
@@ -27,34 +25,8 @@ from colossalai.engine.schedule import NonPipelineSchedule, PipelineSchedule, In
 
 import os
 import sys
-sys.path.append('/home/lclbw/gpt')
+sys.path.append(os.environ['PROJECT'])
 from model import *
-
-@DATASETS.register_module
-class Batch_data(Dataset):
-    def __init__(self, batched_inps):
-        super().__init__()
-        self.index = 0
-        self.data = batched_inps['input_ids']
-        self.attention_mask = batched_inps['attention_mask']
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.index >= self.__len__():
-            raise StopIteration
-        else:
-            return_data = self.__getitem__(self.index)
-            self.index += 1
-        return return_data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        return {'input_ids': self.data[index],
-            'attention_mask': self.attention_mask[index]}, self.data[index]
 
 class GPT2LM(BaseLM):
 
@@ -72,7 +44,7 @@ class GPT2LM(BaseLM):
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
             pretrained if tokenizer is None else tokenizer, revision=revision, subfolder=subfolder)
 
-        # self.vocab_size = self.tokenizer.vocab_size
+        self.vocab_size = self.tokenizer.vocab_size
         self.batch_size_per_gpu = gpc.config.BATCH_SIZE * \
             gpc.get_world_size(ParallelMode.DATA) * getattr(gpc.config, "gradient_accumulation", 1)
 
@@ -84,6 +56,7 @@ class GPT2LM(BaseLM):
         use_pipeline = is_using_pp()
         use_interleaved = hasattr(gpc.config.model, 'num_chunks')
         use_zero3 = hasattr(gpc.config, 'zero') and gpc.config.zero.level == 3
+
         ctx = zero3_model_context() if use_zero3 else contextlib.nullcontext()
 
         with ctx:
@@ -115,20 +88,20 @@ class GPT2LM(BaseLM):
         pretrained_model_path = get_latest_checkpoint_path(gpc.config.checkpoint_path)
         (_, _) = load_checkpoint(pretrained_model_path, self.gpt, self.optimizer, finetune=True, strict=False)
 
-        # logger.info(f'Init done, global batch size = {self.batch_size_per_gpu}', ranks=[0])
-        # tensor_shape = getattr(gpc.config, 'TENSOR_SHAPE', None)
-        # if use_pipeline:
-        #     if use_interleaved:
-        #         logger.info('Build InterleavedPipelineSchedule', ranks=[0])
-        #         self._schedule = InterleavedPipelineSchedule(gpc.config.NUM_MICRO_BATCHES,
-        #                                                gpc.config.model.num_chunks, tensor_shape=tensor_shape, scatter_gather_tensors=True)
-        #     else:
-        #         logger.info('Build PipelineSchedule', ranks=[0])
-        #         self._schedule = PipelineSchedule(gpc.config.NUM_MICRO_BATCHES,
-        #                                     tensor_shape=tensor_shape, scatter_gather_tensors=True)
-        # else:
-        #     self._schedule = NonPipelineSchedule()
-        # self._schedule.pre_processing(self.engine)
+        logger.info(f'Init done, global batch size = {self.batch_size_per_gpu}', ranks=[0])
+        tensor_shape = getattr(gpc.config, 'TENSOR_SHAPE', None)
+        if use_pipeline:
+            if use_interleaved:
+                logger.info('Build InterleavedPipelineSchedule', ranks=[0])
+                self._schedule = InterleavedPipelineSchedule(gpc.config.NUM_MICRO_BATCHES,
+                                                       gpc.config.model.num_chunks, tensor_shape=tensor_shape, scatter_gather_tensors=True)
+            else:
+                logger.info('Build PipelineSchedule', ranks=[0])
+                self._schedule = PipelineSchedule(gpc.config.NUM_MICRO_BATCHES,
+                                            tensor_shape=tensor_shape, scatter_gather_tensors=True)
+        else:
+            self._schedule = NonPipelineSchedule()
+        self._schedule.pre_processing(self.engine)
 
     @property
     def eot_token_id(self):
@@ -163,7 +136,7 @@ class GPT2LM(BaseLM):
     def tok_decode(self, tokens):
         return self.tokenizer.decode(tokens)
 
-    def _model_call(self, input_batch_data):
+    def _model_call(self, data_loader):
         """
         inps: a torch tensor of shape [batch, sequence]
         the size of sequence may vary from call to call
@@ -171,37 +144,19 @@ class GPT2LM(BaseLM):
         returns: a torch tensor of shape [batch, sequence, vocab] with the
         logits returned from the model
         """
-        # with torch.no_grad():
-        #     return self.gpt2(inps)[0][:, :, :50257]
-        data_iter = Batch_data(input_batch_data)
-        # data_iter = col_utils.get_dataloader(data,
-        #                                     seed=42,
-        #                                     batch_size=gpc.config.BATCH_SIZE,
-        #                                     pin_memory=True,
-        #                                     shuffle=False,
-        #                                     drop_last=True)
-
-        ###################################################
-        # if hasattr(data_iter, '__iter__'):
-        #     with torch.no_grad():
-        #         parallel_logits = self.schedule.forward_backward_step(
-        #             self.engine,
-        #             data_iter,
-        #             forward_only=True,
-        #             return_loss=False,
-        #             return_output_label=False,
-        #         )
-        # else:
-        #     raise TypeError('input data is not iterable')
-        ######################################################
+        data_iter = iter(data_loader)
+        # print(gpc.get_global_rank())
         with torch.no_grad():
-            # parallel_logits = self.engine(input_ids=batch_data['input_ids'], attention_mask=batch_data['attention_mask'])
-            parallel_logits = self.engine(**input_batch_data)
+            parallel_logits, _, _ = self.schedule.forward_backward_step(
+                self.engine,
+                data_iter,
+                forward_only=True,
+                return_loss=True,
+                return_output_label=True,
+            )
         if isinstance(self._schedule, InterleavedPipelineSchedule) or isinstance(self._schedule, PipelineSchedule):
             return all_gather(parallel_logits, -1, parallel_mode=self.Parallel_Mode)
-
-        return parallel_logits
-
+        return parallel_logits[:, :, :self.vocab_size]
 
     def _model_generate(self, context, max_length, eos_token_id):
         # return self.gpt2.generate(
@@ -229,64 +184,30 @@ class GPT2LM(BaseLM):
 
         # TODO: automatic (variable) batch size detection for vectorization
         reord = utils.Reorderer(requests, _collate)
-        for chunk in utils.chunks(tqdm(reord.get_reordered(), disable=disable_tqdm), self.batch_size):
-            inps = []
+        request_dataset = utils.Request_Context_Dataset(reord.get_reordered(), self.max_length)
+        request_dataloader = DataLoader(request_dataset, batch_size=gpc.config.BATCH_SIZE, shuffle=False, sampler=None,
+                   batch_sampler=None, collate_fn=utils.collate_fn,
+                   pin_memory=False, drop_last=False)
+        for chunk in utils.chunks(tqdm(reord.get_reordered(), disable=disable_tqdm), gpc.config.BATCH_SIZE):
             cont_toks_list = []
             inplens = []
-            masks = []
-
-            padding_length = None
-
-            # because vectorizing is annoying, we first convert each (context, continuation) pair to padded
-            # tensors, then we pack them together into a batch, call the model, and then pick it all apart
-            # again because vectorizing is annoying
-
             for _, context_enc, continuation_enc in chunk:
-                # sanity check
                 assert len(context_enc) > 0
                 assert len(continuation_enc) > 0
                 assert len(continuation_enc) <= self.max_length
-
-                # how this all works:
-                #          CTX      CONT
-                # inp    0 1 2 3|4 5 6 7 8 9   <- last token is deleted by inp[:, :-1]
-                # gpt2    \               \
-                # logits   1 2 3|4 5 6 7 8 9   <- the ctx half gets tossed out by the
-                # cont_toks      4 5 6 7 8 9      [:, -len(continuation_enc):, :self.vocab_size] slice
-
-                # when too long to fit in context, truncate from the left
                 inp = torch.tensor(
                     (context_enc + continuation_enc)[-(self.max_length+1):][:-1],
                     dtype=torch.long
                 ).to(self.device)
+
                 inplen, = inp.shape
-
                 cont = continuation_enc
-
-                # since in _collate we make sure length is descending, the longest is always the first one.
-                padding_length = padding_length if padding_length is not None else inplen
-
-                # pad length from seq to padding_length
-                inp = torch.cat([
-                    inp,  # [seq]
-                    torch.zeros(padding_length - inplen, dtype=torch.long).to(inp.device)  # [padding_length - seq]
-                ], dim=0)
-
-                attention_mask = torch.where(inp!=0, 1, 0)
-
-                inps.append(inp.unsqueeze(0))  # [1, padding_length]
-                masks.append(attention_mask.unsqueeze(0))
                 cont_toks_list.append(cont)
                 inplens.append(inplen)
 
-            batched_inps = torch.cat(inps, dim=0)  # [batch, padding_length
-            batched_masks = torch.cat(masks, dim=0)
-            batch_data = {'input_ids': batched_inps, 'attention_mask': batched_masks}
-
-            multi_logits = F.log_softmax(self._model_call(batch_data), dim=-1).cpu()  # [batch, padding_length, vocab]
-
-            for (cache_key, _, _), logits, inp, inplen, cont_toks \
-                    in zip(chunk, multi_logits, inps, inplens, cont_toks_list):
+            multi_logits = F.log_softmax(self._model_call(request_dataloader), dim=-1).cpu()  # [batch, padding_length, vocab]
+            for (cache_key, _, _), logits, inplen, cont_toks \
+                    in zip(chunk, multi_logits, inplens, cont_toks_list):
 
                 # Slice to original seq length
                 contlen = len(cont_toks)
@@ -309,5 +230,8 @@ class GPT2LM(BaseLM):
                     self.cache_hook.add_partial("loglikelihood", cache_key, answer)
 
                 res.append(answer)
-
+        # import pdb; pdb.set_trace()
         return reord.get_original(res)
+
+    def greedy_until(self, requests):
+        raise NotImplementedError
