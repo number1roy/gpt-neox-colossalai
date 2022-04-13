@@ -4,7 +4,7 @@ from torch.optim import Adam
 
 
 BATCH_SIZE = 1
-NUM_EPOCHS = 2
+NUM_EPOCHS = 1
 SEQ_LEN = 1024
 
 optimizer = dict(
@@ -28,4 +28,4 @@ parallel = dict(
     tensor=dict(size=1, mode=None),
 )
 
-save_checkpoint_path = '../gpt_pretrained/vanlilla_ckpt'
+max_steps = 100

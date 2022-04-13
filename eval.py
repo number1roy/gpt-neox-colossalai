@@ -1,7 +1,5 @@
-import torch
 import colossalai
-from colossalai.logging import get_dist_logger, disable_existing_loggers
-from lm_eval.models import get_model
+from colossalai.logging import disable_existing_loggers
 from colossalai.core import global_context as gpc
 from lm_eval import tasks, evaluator
 import json
@@ -18,7 +16,6 @@ def main():
                                      host=args.host,
                                      port=29500,
                                      seed=42)
-    logger = get_dist_logger()
 
     if len(gpc.config.task_list) == 1 and gpc.config.task_list[0] == "all_tasks":
         task_names = tasks.ALL_TASKS
@@ -27,17 +24,20 @@ def main():
 
     description_dict = None
     if gpc.config.description_dict_path:
-        description_dict = {}
         with open(gpc.config.description_dict_path, 'r') as f:
             description_dict = json.load(f)
 
+    model_type = gpc.config.get('model_type', None)
+    assert model_type is not None, 'The model type could not be None'
+    type = model_type.split('-')[0]
+
     results = evaluator.simple_evaluate(
-        model=gpc.config.model_type,
+        model=type,
         model_args=None,
-        tasks=gpc.config.task_list,
+        tasks=task_names,
         num_fewshot=gpc.config.num_fewshot,
         device='cuda',
-        no_cache=False,
+        no_cache=gpc.config.no_cache,
         limit=None,
         description_dict=description_dict
     )

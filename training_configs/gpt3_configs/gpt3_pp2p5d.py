@@ -31,3 +31,5 @@ model = dict(
     dtype=torch.half,
     num_chunks=1,
 )
+
+max_steps = 100

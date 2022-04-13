@@ -2,10 +2,9 @@ from colossalai.amp import AMP_TYPE
 from model_zoo.gpt.gpt import gpt2_small
 from torch.optim import Adam
 
-model_type = 'gpt2'
-BATCH_SIZE = 2
-NUM_EPOCHS = 1
+
 SEQ_LEN = 1024
+model_type = 'gpt2-small'
 
 optimizer = dict(
     type=Adam,
@@ -17,7 +16,6 @@ fp16 = dict(
     mode=AMP_TYPE.NAIVE
 )
 
-
 model = dict(
     type=gpt2_small,
     checkpoint=True,
@@ -28,10 +26,12 @@ parallel = dict(
     tensor=dict(size=1, mode=None),
 )
 
-checkpoint_path = '/home/lclbw/gpt_pretrained/small_ckpt'
-task_list = ['blimp_anaphor_gender_agreement']
-num_fewshot = 0
-max_position_embeddings = 512
-
-description_dict_path = None
-output_path = '/home/lclbw/eval_output'
+text_gen_type = 'unconditional'
+checkpoint_path = '/home/lclbw/gpt_pretrained/small_ckpt.pt'
+sample_output_file = '/home/lclbw/unconditional_generate_output'
+num_samples = 2
+maximum_tokens = 10
+recompute = True
+temperature = 1.0
+top_k = 5
+top_p = 0.6

@@ -2,10 +2,8 @@ from colossalai.nn.optimizer import CPUAdam
 from colossalai.zero.shard_utils import TensorShardStrategy
 from model_zoo.gpt.gpt import gpt2_small
 
-BATCH_SIZE = 2
-NUM_EPOCHS = 60
 SEQ_LEN = 1024
-
+model_type = 'gpt2-small'
 
 zero = dict(
     model_config=dict(
@@ -29,4 +27,12 @@ model = dict(
     checkpoint=True,
 )
 
-max_steps = 100
+text_gen_type = 'input-file'
+checkpoint_path = '/home/lclbw/gpt_pretrained/small_ckpt.pt'
+sample_output_file = '/home/lclbw/generate_output'
+sample_input_file = '/home/lclbw/generate_input'
+maximum_tokens = 10
+recompute = False
+temperature = 1.0
+top_k = 5
+top_p = 0.7

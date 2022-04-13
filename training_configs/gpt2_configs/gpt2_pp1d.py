@@ -4,8 +4,8 @@ from colossalai.amp import AMP_TYPE
 import torch
 from model import vocab_parallel_cross_entropy
 
-BATCH_SIZE = 8
-NUM_EPOCHS = 60
+BATCH_SIZE = 16
+NUM_EPOCHS = 140
 SEQ_LEN = 1024
 
 NUM_MICRO_BATCHES = 1
@@ -37,3 +37,5 @@ model = dict(
 )
 
 loss_fn = dict(type=vocab_parallel_cross_entropy)
+checkpoint_path = '/home/lclbw/gpt_pretrained/small_ckpt.pt'
+save_checkpoint_path = '/home/lclbw/gpt_pretrained/small_ckpt.pt'

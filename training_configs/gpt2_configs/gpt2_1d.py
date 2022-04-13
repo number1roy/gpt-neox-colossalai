@@ -32,3 +32,5 @@ parallel = dict(
     pipeline=1,
     tensor=dict(size=TENSOR_PARALLEL, mode='1d'),
 )
+
+max_steps = 100

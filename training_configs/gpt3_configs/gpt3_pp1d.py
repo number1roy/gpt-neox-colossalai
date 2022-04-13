@@ -34,4 +34,5 @@ model = dict(
     num_chunks=1,
 )
 
+max_steps = 100
 loss_fn = dict(type=vocab_parallel_cross_entropy)

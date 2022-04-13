@@ -11,7 +11,6 @@ from colossalai import kernel
 from colossalai import nn as col_nn
 import model_zoo.gpt.gpt as col_gpt
 from colossalai.logging import get_dist_logger
-from colossalai.core import global_context as gpc
 
 __all__ = [
     'GPT2_small_pipeline_1D',
@@ -20,9 +19,6 @@ __all__ = [
     'GPT2_exlarge_pipeline_hybrid',
     'GPT2_small_pipeline_hybrid',
     'GPT3_pipeline_hybrid',
-    'GPT_custom_pipeline_hybrid',
-    'GPT_custom_pipeline_1D',
-    'GPT_Neox_pipeline_1D',
 
 ]
 
@@ -266,20 +262,3 @@ def GPT3_pipeline_hybrid(num_chunks=1, checkpoint=False, dtype=torch.float, embe
     cfg = dict(hidden_size=12288, num_attention_heads=96,
                checkpoint=checkpoint, max_position_embeddings=2048, dtype=dtype, embed_split_hidden=embed_split_hidden)
     return _build_gpt_pipeline_hybrid(96, num_chunks, **cfg)
-
-def GPT_custom_pipeline_hybrid(num_chunks=1, checkpoint=False, dtype=torch.float, embed_split_hidden=False, vocab_size=50304, max_position_embeddings=1024):
-    cfg = dict(hidden_size=gpc.config.HIDDEN_SIZE, num_attention_heads=gpc.config.num_attention_heads,
-            vocab_size=vocab_size, max_position_embeddings=max_position_embeddings, checkpoint=checkpoint,
-            dtype=dtype, embed_split_hidden=embed_split_hidden)
-    return _build_gpt_pipeline_hybrid(gpc.config.num_layers, num_chunks, **cfg)
-
-def GPT_custom_pipeline_1D(num_chunks=1, checkpoint=False, dtype=torch.float, embed_split_hidden=False, fused=False, vocab_size=50304, max_position_embeddings=1024):
-    cfg = dict(hidden_size=gpc.config.HIDDEN_SIZE, num_attention_heads=gpc.config.num_attention_heads,
-                vocab_size=vocab_size, max_position_embeddings=max_position_embeddings, checkpoint=checkpoint,
-                dtype=dtype, embed_split_hidden=embed_split_hidden)
-    return _build_gpt_pipeline_1d(gpc.config.num_layers, num_chunks, fused=fused, **cfg)
-
-def GPT_Neox_pipeline_1D(num_chunks=1, checkpoint=False, dtype=torch.half, embed_split_hidden=False, fused=False):
-    cfg = dict(hidden_size=12288, num_attention_heads=64, vocab_size=50304,
-               checkpoint=checkpoint, max_position_embeddings=2048, dtype=dtype, embed_split_hidden=embed_split_hidden)
-    return _build_gpt_pipeline_1d(44, num_chunks, fused=fused, **cfg)

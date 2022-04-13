@@ -92,7 +92,8 @@ def collate_fn(batch):
 
     batched_inps = torch.cat(inps, dim=0)  # [batch, padding_length]
     batched_masks = torch.cat(masks, dim=0)
-    return [batched_inps, batched_masks]
+    label = torch.ones(batched_inps.size(), dtype=int)
+    return {'input_ids': batched_inps, 'attention_mask': batched_masks}, label
 
 def sh(x):
     if os.system(x):

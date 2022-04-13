@@ -1,36 +1,32 @@
 import transformers
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-import colossalai
 import contextlib
-import colossalai.utils as col_utils
+import torch.nn.functional as F
+import torch.nn as nn
+from torch.utils.data import DataLoader
+import colossalai
 from tqdm import tqdm
 from lm_eval.base import BaseLM
 from lm_eval import utils
-
-from colossalai.registry import DATASETS
 from colossalai.core import global_context as gpc
 from colossalai.utils import is_using_pp
-from colossalai.utils.timer import MultiTimer
-from colossalai.utils.checkpointing import get_latest_checkpoint_path, load_checkpoint
-from colossalai.zero import zero3_model_context
+from colossalai.utils.checkpointing import load_checkpoint
 from model_zoo.gpt.gpt import GPTLMLoss
-from colossalai.logging import get_dist_logger, disable_existing_loggers
+from colossalai.logging import get_dist_logger
 from colossalai.communication import all_gather
 from colossalai.context import ParallelMode
-from colossalai.trainer import hooks, Trainer
-from colossalai.nn import LinearWarmupLR
-from colossalai.engine.schedule import NonPipelineSchedule, PipelineSchedule, InterleavedPipelineSchedule
+from colossalai.engine.schedule import NonPipelineSchedule
+from colossalai.zero.init_ctx import ZeroInitContext
+from model.hf_model import build_model, load_config_from_colossalai
 
-import os
-import sys
-sys.path.append(os.environ['PROJECT'])
+# import os
+# import sys
+# sys.path.append(os.environ['PROJECT'])
 from model import *
 
 class GPT2LM(BaseLM):
 
-    def __init__(self, device='cuda',pretrained='gpt2', revision='main', subfolder=None, tokenizer=None):
+    def __init__(self, device='cuda', revision='main', subfolder=None, tokenizer=None):
         super().__init__()
 
         assert isinstance(device, str)
@@ -41,6 +37,8 @@ class GPT2LM(BaseLM):
             self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
         # self.tokenizer = transformers.GPT2Tokenizer
+        token_type = gpc.config.model_type.split('-')[0]
+        assert token_type in ['gpt2', 'gpt3'], f'The tokenizer type {token_type} is unknown.'
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(
             pretrained if tokenizer is None else tokenizer, revision=revision, subfolder=subfolder)
 
@@ -49,29 +47,21 @@ class GPT2LM(BaseLM):
             gpc.get_world_size(ParallelMode.DATA) * getattr(gpc.config, "gradient_accumulation", 1)
 
         self._schedule = None
-
         logger = get_dist_logger()
 
         logger.info('Build model', ranks=[0])
-        use_pipeline = is_using_pp()
-        use_interleaved = hasattr(gpc.config.model, 'num_chunks')
-        use_zero3 = hasattr(gpc.config, 'zero') and gpc.config.zero.level == 3
+        use_zero3 = hasattr(gpc.config, 'zero')
 
-        ctx = zero3_model_context() if use_zero3 else contextlib.nullcontext()
-
+        ctx = contextlib.nullcontext()
+        if use_zero3:
+            ctx = ZeroInitContext(target_device=torch.cuda.current_device(),
+                                  shard_strategy=gpc.config.zero.model_config.shard_strategy,
+                                  shard_param=True
+                                  )
         with ctx:
             model = gpc.config.model.pop('type')(**gpc.config.model)
 
-        if use_pipeline and use_interleaved and not isinstance(model, nn.ModuleList):
-            model = nn.ModuleList([model])
-
         self.gpt = model
-
-        ###################### To Do #################################
-        self.Parallel_Mode = ParallelMode.PARALLEL_2D_COL
-        # self.Parallel_Mode = ParallelMode.PIPELINE
-        ##############################################################
-
         self.criterion = getattr(gpc.config, 'loss_fn', None)
         if self.criterion is not None:
             self.criterion = self.criterion.type()
@@ -85,22 +75,15 @@ class GPT2LM(BaseLM):
         self.engine, _, _, _ = colossalai.initialize(self.gpt, self.optimizer, self.criterion)
         self.engine.eval()
 
-        pretrained_model_path = get_latest_checkpoint_path(gpc.config.checkpoint_path)
-        (_, _) = load_checkpoint(pretrained_model_path, self.gpt, self.optimizer, finetune=True, strict=False)
+        assert getattr(gpc.config, "checkpoint_path", None) is not None, \
+            f'Please give the checkpoint path in configuration.'
+        last_epoch = load_checkpoint(gpc.config.checkpoint_path, self.gpt, self.optimizer, strict=False)
+        logger.info(f'checkpoint loading finised, resume from {last_epoch} epoch', ranks=[0])
 
         logger.info(f'Init done, global batch size = {self.batch_size_per_gpu}', ranks=[0])
         tensor_shape = getattr(gpc.config, 'TENSOR_SHAPE', None)
-        if use_pipeline:
-            if use_interleaved:
-                logger.info('Build InterleavedPipelineSchedule', ranks=[0])
-                self._schedule = InterleavedPipelineSchedule(gpc.config.NUM_MICRO_BATCHES,
-                                                       gpc.config.model.num_chunks, tensor_shape=tensor_shape, scatter_gather_tensors=True)
-            else:
-                logger.info('Build PipelineSchedule', ranks=[0])
-                self._schedule = PipelineSchedule(gpc.config.NUM_MICRO_BATCHES,
-                                            tensor_shape=tensor_shape, scatter_gather_tensors=True)
-        else:
-            self._schedule = NonPipelineSchedule()
+
+        self._schedule = NonPipelineSchedule()
         self._schedule.pre_processing(self.engine)
 
     @property
@@ -145,7 +128,6 @@ class GPT2LM(BaseLM):
         logits returned from the model
         """
         data_iter = iter(data_loader)
-        # print(gpc.get_global_rank())
         with torch.no_grad():
             parallel_logits, _, _ = self.schedule.forward_backward_step(
                 self.engine,
@@ -154,8 +136,7 @@ class GPT2LM(BaseLM):
                 return_loss=True,
                 return_output_label=True,
             )
-        if isinstance(self._schedule, InterleavedPipelineSchedule) or isinstance(self._schedule, PipelineSchedule):
-            return all_gather(parallel_logits, -1, parallel_mode=self.Parallel_Mode)
+
         return parallel_logits[:, :, :self.vocab_size]
 
     def _model_generate(self, context, max_length, eos_token_id):
@@ -188,6 +169,7 @@ class GPT2LM(BaseLM):
         request_dataloader = DataLoader(request_dataset, batch_size=gpc.config.BATCH_SIZE, shuffle=False, sampler=None,
                    batch_sampler=None, collate_fn=utils.collate_fn,
                    pin_memory=False, drop_last=False)
+        # import pdb; pdb.set_trace()
         for chunk in utils.chunks(tqdm(reord.get_reordered(), disable=disable_tqdm), gpc.config.BATCH_SIZE):
             cont_toks_list = []
             inplens = []

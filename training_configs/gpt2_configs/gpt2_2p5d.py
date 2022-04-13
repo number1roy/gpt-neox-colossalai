@@ -2,8 +2,7 @@ from colossalai.amp import AMP_TYPE
 from model_zoo.gpt.gpt import GPTLMLoss, gpt2_small
 from torch.optim import Adam
 
-
-BATCH_SIZE = 1
+BATCH_SIZE = 4
 SEQ_LEN = 1024
 NUM_EPOCHS = 60
 TERSOR_PARALLEL = 8
@@ -34,3 +33,5 @@ parallel = dict(
     pipeline=1,
     tensor=dict(size=TERSOR_PARALLEL, depth=DEPTH, mode='2.5d'),
 )
+
+max_steps = 100

@@ -1,11 +1,12 @@
 from colossalai.nn.optimizer import CPUAdam
 from colossalai.zero.shard_utils import TensorShardStrategy
-from model_zoo.gpt.gpt import gpt2_small
+from model_zoo.gpt.gpt import GPTLMLoss
+from model.custom_model_zoo import neox_20B
+from model import vocab_parallel_cross_entropy
 
 BATCH_SIZE = 2
 NUM_EPOCHS = 60
-SEQ_LEN = 1024
-
+SEQ_LEN = 2048
 
 zero = dict(
     model_config=dict(
@@ -17,16 +18,23 @@ zero = dict(
     )
 )
 
+loss = dict(
+    type=GPTLMLoss,
+)
 
 optimizer = dict(
     type=CPUAdam,
-    lr=0.00015,
+    lr=0.97e-4,
+    betas=(0.9, 0.95),
+    eps=1.0e-8,
     weight_decay=1e-2,
 )
 
 model = dict(
-    type=gpt2_small,
+    type=neox_20B,
     checkpoint=True,
 )
 
-max_steps = 100
+max_steps = 10
+# checkpoint_path = '../gpt_pretrained/neox/neox_20B.pt'
+save_checkpoint_path = '../gpt_pretrained/neox/neox_20B.pt'
